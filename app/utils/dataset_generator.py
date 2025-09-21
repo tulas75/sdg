@@ -307,18 +307,15 @@ def generate_dataset(file_path: str, provider: str, model: str) -> Dict[str, Any
     Returns:
         Dictionary with paths to generated files and statistics
     """
-    print(f"DEBUG: Processing file: {file_path}")
-    
     # Extract text from the input file based on its type
     text = extract_text_from_file(file_path)
-    print(f"DEBUG: Extracted text length: {len(text)} characters")
     
-    # Get QA_PER_CHUNK from environment or default to 3
+    # Get configuration from environment
     qa_per_chunk = int(os.getenv('QA_PER_CHUNK', '3'))
-    print(f"DEBUG: QA_PER_CHUNK setting: {qa_per_chunk}")
+    chunk_size = int(os.getenv('CHUNK_SIZE', '2000'))
     
     # Split text into manageable chunks for LLM processing
-    chunks = split_text_into_chunks(text, chunk_size=2000)
+    chunks = split_text_into_chunks(text, chunk_size=chunk_size)
     
     # Generate Q/A pairs for each chunk
     all_qa_pairs = []
@@ -401,11 +398,12 @@ def generate_dataset_from_files(file_paths: List[str], provider: str, model: str
         except Exception as e:
             raise Exception(f"Error processing file {file_path}: {str(e)}")
     
-    # Get QA_PER_CHUNK from environment or default to 3
+    # Get configuration from environment
     qa_per_chunk = int(os.getenv('QA_PER_CHUNK', '3'))
+    chunk_size = int(os.getenv('CHUNK_SIZE', '2000'))
     
     # Split combined text into manageable chunks for LLM processing
-    chunks = split_text_into_chunks(combined_text, chunk_size=2000)
+    chunks = split_text_into_chunks(combined_text, chunk_size=chunk_size)
     
     # Generate Q/A pairs for each chunk
     all_qa_pairs = []
