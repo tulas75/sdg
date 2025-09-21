@@ -14,6 +14,7 @@ A Flask-based API service that generates synthetic Q/A datasets from user-upload
   - Plain Text (.txt)
   - ZIP archives containing any of the above
 - Automatic language detection and generation in the same language as input text
+- Streamlit web interface for easy file upload and dataset generation
 
 ## Setup
 
@@ -32,11 +33,18 @@ A Flask-based API service that generates synthetic Q/A datasets from user-upload
    python -m app.main
    ```
 
+The server will start on `http://localhost:5000`.
+
 ## API Endpoints
 
 ### Health Check
 ```
 GET /api/health
+```
+
+Example:
+```bash
+curl http://localhost:5000/api/health
 ```
 
 ### Upload Files and Generate Dataset
@@ -60,6 +68,61 @@ curl -X POST -F "files=@document1.pdf" -F "files=@document2.docx" http://localho
 curl -X POST -F "file=@documents.zip" http://localhost:5000/api/upload
 ```
 
+The API supports the following file types:
+- PDF (.pdf)
+- Word Documents (.docx)
+- Plain Text (.txt)
+- ZIP archives (.zip) containing any of the above
+
+## Web Interface (Streamlit)
+
+The project includes a Streamlit web interface for easier interaction with the API:
+
+1. Install Streamlit dependencies:
+   ```bash
+   pip install -r streamlit_app/requirements.txt
+   ```
+
+2. Run the Streamlit app (with the Flask API running):
+   ```bash
+   streamlit run streamlit_app/app.py
+   ```
+
+3. Access the web interface at http://localhost:8501
+
+## Example with a Sample File
+
+1. Create a sample text file:
+   ```bash
+   echo "The quick brown fox jumps over the lazy dog. This is a sample text for testing our synthetic dataset generator." > sample.txt
+   ```
+
+2. Upload the file and generate datasets:
+   ```bash
+   curl -X POST -F "file=@sample.txt" http://localhost:5000/api/upload
+   ```
+
+3. You can also try with other supported formats:
+   ```bash
+   # For PDF files
+   curl -X POST -F "file=@document.pdf" http://localhost:5000/api/upload
+   
+   # For Word documents
+   curl -X POST -F "file=@document.docx" http://localhost:5000/api/upload
+   
+   # For multiple files
+   curl -X POST -F "files=@document1.pdf" -F "files=@document2.docx" http://localhost:5000/api/upload
+   
+   # For ZIP files containing multiple documents
+   curl -X POST -F "file=@documents.zip" http://localhost:5000/api/upload
+   ```
+
+4. Check the output files in the `output` directory:
+   ```bash
+   ls -la output/
+   cat output/train.jsonl
+   ```
+
 ## Configuration
 
 The application can be configured using environment variables:
@@ -67,6 +130,13 @@ The application can be configured using environment variables:
 - `LITELLM_PROVIDER`: LiteLLM provider (default: ollama_chat)
 - `MODEL_NAME`: Model name (default: gemma3:4b-it-fp16)
 - `FLASK_ENV`: Flask environment (default: development)
+
+Copy the `.env.example` file to `.env` and modify as needed:
+```bash
+cp .env.example .env
+```
+
+Then edit the `.env` file to set your preferred LLM provider and model.
 
 ## Dataset Format
 

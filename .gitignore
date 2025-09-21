@@ -45,5 +45,4 @@ temp/
 .env
 
 # Sample files
-sample.txt
-sample.pdf
+sample*.*

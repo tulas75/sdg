@@ -48,26 +48,7 @@ def upload_files() -> Union[Dict[str, Any], Tuple[Dict[str, str], int]]:
             # Save the file
             file_path = os.path.join(upload_dir, filename)
             file.save(file_path)
-            
-            # If it's a ZIP file, extract it and add individual files
-            if filename.lower().endswith('.zip'):
-                try:
-                    with zipfile.ZipFile(file_path, 'r') as zip_ref:
-                        # Extract all files
-                        extract_dir = os.path.join(upload_dir, 'extracted')
-                        if not os.path.exists(extract_dir):
-                            os.makedirs(extract_dir)
-                        zip_ref.extractall(extract_dir)
-                        
-                        # Add extracted files to file_paths
-                        for root, dirs, extracted_files in os.walk(extract_dir):
-                            for extracted_file in extracted_files:
-                                extracted_file_path = os.path.join(root, extracted_file)
-                                file_paths.append(extracted_file_path)
-                except Exception as e:
-                    return {'error': f'Error extracting ZIP file: {str(e)}'}, 500
-            else:
-                file_paths.append(file_path)
+            file_paths.append(file_path)
     
     if not file_paths:
         return {'error': 'No valid files provided'}, 400
