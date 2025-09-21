@@ -13,6 +13,7 @@ A Flask-based API service that generates synthetic Q/A datasets from user-upload
   - Word Documents (.docx)
   - Plain Text (.txt)
   - ZIP archives containing any of the above
+- Automatic language detection and generation in the same language as input text
 
 ## Setup
 
@@ -86,5 +87,6 @@ The generated datasets are in JSONL format with each line containing a JSON obje
 3. The system calculates the number of Q/A pairs based on combined text length:
    - 1 pair per 1000 characters (minimum 3 pairs)
    - Split into train/valid/test sets (80/10/10)
-4. LiteLLM generates Q/A pairs using the configured provider and model
-5. Datasets are saved as JSONL files in the `output` directory
+4. For each text chunk, the system detects the language automatically
+5. LiteLLM generates Q/A pairs using the configured provider and model in the detected language
+6. Datasets are saved as JSONL files in the `output` directory

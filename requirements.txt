@@ -4,3 +4,4 @@ python-dotenv
 werkzeug
 PyPDF2
 python-docx
+langdetect

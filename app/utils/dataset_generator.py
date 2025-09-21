@@ -5,8 +5,98 @@ import random
 import textwrap
 from typing import Dict, Any, List
 import litellm
+try:
+    import langdetect
+    LANGDETECT_AVAILABLE = True
+except ImportError:
+    LANGDETECT_AVAILABLE = False
 from app.utils.text_utils import calculate_qa_count
 from app.utils.file_handler import extract_text_from_file
+
+
+def split_text_into_chunks(text: str, chunk_size: int = 2000) -> List[str]:
+    """
+    Split text into chunks of approximately equal size.
+    Uses multiple strategies to handle different document types effectively.
+    
+    Args:
+        text: Input text to split
+        chunk_size: Target size for each chunk in characters
+        
+    Returns:
+        List of text chunks
+    """
+    # Strategy 1: Try sentence-based splitting first (works well for PDFs)
+    sentences = text.split('. ')
+    chunks = []
+    current_chunk = ""
+    
+    for sentence in sentences:
+        # Add period back that was removed by split
+        sentence_with_period = sentence + '. ' if sentence else ""
+        
+        # If adding this sentence would exceed chunk size, save current chunk
+        if len(current_chunk) + len(sentence_with_period) > chunk_size and current_chunk:
+            chunks.append(current_chunk.strip())
+            current_chunk = sentence_with_period
+        else:
+            current_chunk += sentence_with_period
+    
+    # Add the last chunk if it exists
+    if current_chunk.strip():
+        chunks.append(current_chunk.strip())
+    
+    # Strategy 2: If we still have very large chunks, split them further
+    final_chunks = []
+    for chunk in chunks:
+        if len(chunk) > chunk_size * 1.5:  # If chunk is 50% larger than target
+            # Split by word boundaries
+            words = chunk.split(' ')
+            small_chunk = ""
+            for word in words:
+                if len(small_chunk) + len(word) > chunk_size and small_chunk:
+                    final_chunks.append(small_chunk.strip())
+                    small_chunk = word + ' '
+                else:
+                    small_chunk += word + ' '
+            if small_chunk.strip():
+                final_chunks.append(small_chunk.strip())
+        else:
+            final_chunks.append(chunk)
+    
+    # Strategy 3: If chunks are still too large, do hard character splitting
+    ultimate_chunks = []
+    for chunk in final_chunks:
+        if len(chunk) > chunk_size * 2:  # If still too large
+            # Hard split every chunk_size characters
+            for i in range(0, len(chunk), chunk_size):
+                ultimate_chunks.append(chunk[i:i + chunk_size])
+        else:
+            ultimate_chunks.append(chunk)
+    
+    return ultimate_chunks
+
+
+def detect_language(text: str) -> str:
+    """
+    Detect the language of the given text.
+    
+    Args:
+        text: Input text to analyze
+        
+    Returns:
+        Two-letter ISO language code (e.g., 'en', 'fr', 'de') or 'unknown' if detection fails
+    """
+    if not LANGDETECT_AVAILABLE:
+        return 'unknown'
+    
+    try:
+        # Use only first 1000 characters for language detection to improve performance
+        sample_text = text[:1000] if len(text) > 1000 else text
+        detected_lang = langdetect.detect(sample_text)
+        return detected_lang
+    except Exception:
+        return 'unknown'
 
 
 def generate_qa_pairs(text: str, count: int, provider: str, model: str) -> List[Dict[str, str]]:
@@ -22,6 +112,14 @@ def generate_qa_pairs(text: str, count: int, provider: str, model: str) -> List[
     Returns:
         List of Q/A pairs in the format {"prompt": "...", "completion": "..."}
     """
+    # Limit text length to prevent overwhelming the LLM
+    max_text_length = 5000  # Limit to 5000 characters per chunk
+    if len(text) > max_text_length:
+        text = text[:max_text_length]
+    
+    # Detect language of the input text
+    language = detect_language(text)
+    
     qa_pairs = []
     
     # Create the prompt for the LLM
@@ -47,6 +145,7 @@ def generate_qa_pairs(text: str, count: int, provider: str, model: str) -> List[
     - Make questions unambiguous and answers comprehensive
     - Focus on the most important information in the text
     - Avoid yes/no questions unless they test specific factual information
+    - Generate questions and answers in the same language as the input text (detected language: {language})
     
     Text:
     {text}
@@ -208,14 +307,48 @@ def generate_dataset(file_path: str, provider: str, model: str) -> Dict[str, Any
     Returns:
         Dictionary with paths to generated files and statistics
     """
+    print(f"DEBUG: Processing file: {file_path}")
+    
     # Extract text from the input file based on its type
     text = extract_text_from_file(file_path)
+    print(f"DEBUG: Extracted text length: {len(text)} characters")
     
-    # Calculate Q/A pair counts
+    # Get QA_PER_CHUNK from environment or default to 3
+    qa_per_chunk = int(os.getenv('QA_PER_CHUNK', '3'))
+    print(f"DEBUG: QA_PER_CHUNK setting: {qa_per_chunk}")
+    
+    # Split text into manageable chunks for LLM processing
+    chunks = split_text_into_chunks(text, chunk_size=2000)
+    
+    # Generate Q/A pairs for each chunk
+    all_qa_pairs = []
+    for i, chunk in enumerate(chunks):
+        print(f"DEBUG: Processing chunk {i+1}/{len(chunks)}, length: {len(chunk)}")
+        chunk_qa_pairs = generate_qa_pairs(chunk, qa_per_chunk, provider, model)
+        print(f"DEBUG: Generated {len(chunk_qa_pairs)} Q/A pairs from chunk {i+1}")
+        all_qa_pairs.extend(chunk_qa_pairs)
+    
+    print(f"DEBUG: Total Q/A pairs generated: {len(all_qa_pairs)}")
+    
+    # Calculate total Q/A pair counts
+    total_requested = len(all_qa_pairs)
     counts = calculate_qa_count(len(text))
     
-    # Generate all Q/A pairs at once
-    all_qa_pairs = generate_qa_pairs(text, counts['total'], provider, model)
+    # Adjust counts to match actual generated pairs if different
+    if total_requested != counts['total']:
+        # Recalculate distribution based on actual generated count
+        train_count = max(1, int(total_requested * 0.8))
+        valid_count = max(1, int(total_requested * 0.1))
+        test_count = total_requested - train_count - valid_count
+        
+        counts = {
+            'train': train_count,
+            'valid': valid_count,
+            'test': test_count,
+            'total': total_requested
+        }
+    
+    print(f"DEBUG: Distribution - Train: {counts['train']}, Valid: {counts['valid']}, Test: {counts['test']}")
     
     # Randomly shuffle the Q/A pairs
     random.shuffle(all_qa_pairs)
@@ -268,11 +401,35 @@ def generate_dataset_from_files(file_paths: List[str], provider: str, model: str
         except Exception as e:
             raise Exception(f"Error processing file {file_path}: {str(e)}")
     
-    # Calculate Q/A pair counts based on combined text length
+    # Get QA_PER_CHUNK from environment or default to 3
+    qa_per_chunk = int(os.getenv('QA_PER_CHUNK', '3'))
+    
+    # Split combined text into manageable chunks for LLM processing
+    chunks = split_text_into_chunks(combined_text, chunk_size=2000)
+    
+    # Generate Q/A pairs for each chunk
+    all_qa_pairs = []
+    for i, chunk in enumerate(chunks):
+        chunk_qa_pairs = generate_qa_pairs(chunk, qa_per_chunk, provider, model)
+        all_qa_pairs.extend(chunk_qa_pairs)
+    
+    # Calculate total Q/A pair counts
+    total_requested = len(all_qa_pairs)
     counts = calculate_qa_count(len(combined_text))
     
-    # Generate all Q/A pairs at once
-    all_qa_pairs = generate_qa_pairs(combined_text, counts['total'], provider, model)
+    # Adjust counts to match actual generated pairs if different
+    if total_requested != counts['total']:
+        # Recalculate distribution based on actual generated count
+        train_count = max(1, int(total_requested * 0.8))
+        valid_count = max(1, int(total_requested * 0.1))
+        test_count = total_requested - train_count - valid_count
+        
+        counts = {
+            'train': train_count,
+            'valid': valid_count,
+            'test': test_count,
+            'total': total_requested
+        }
     
     # Randomly shuffle the Q/A pairs
     random.shuffle(all_qa_pairs)
