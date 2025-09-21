@@ -1,4 +1,4 @@
-# Synthetic Dataset Generator API
+# Synthetic Dataset Generator (SDG)
 
 A Flask-based API service that generates synthetic Q/A datasets from user-uploaded files using LiteLLM.
 
@@ -38,13 +38,26 @@ A Flask-based API service that generates synthetic Q/A datasets from user-upload
 GET /api/health
 ```
 
-### Upload File and Generate Dataset
+### Upload Files and Generate Dataset
 ```
 POST /api/upload
 ```
 
 Form data:
-- `file`: The text file to process
+- `file`: A single file to process
+- `files`: Multiple files to process (use multiple `files` parameters)
+
+Examples:
+```bash
+# Single file
+curl -X POST -F "file=@document.pdf" http://localhost:5000/api/upload
+
+# Multiple files
+curl -X POST -F "files=@document1.pdf" -F "files=@document2.docx" http://localhost:5000/api/upload
+
+# ZIP file containing multiple documents
+curl -X POST -F "file=@documents.zip" http://localhost:5000/api/upload
+```
 
 ## Configuration
 
