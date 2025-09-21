@@ -1,5 +1,6 @@
 import os
 from io import BytesIO
+import time
 import streamlit as st
 import requests
 
@@ -43,24 +44,71 @@ def upload_files_and_generate(files):
         files_to_upload.append(("files", (file.name, file, file.type)))
     
     try:
-        with st.spinner("Processing files and generating datasets... This may take several minutes depending on the file size and number of files."):
-            # For large files, we remove the timeout to avoid premature termination
-            # This is intentional as processing thousands of pages can take a long time
-            response = requests.post(UPLOAD_ENDPOINT, files=files_to_upload)  # pylint: disable=missing-timeout
+        with st.spinner("Uploading files..."):
+            # Upload files and get task ID
+            response = requests.post(UPLOAD_ENDPOINT, files=files_to_upload, timeout=30)
             
         if response.status_code == 200:
-            return response.json()
+            result = response.json()
+            task_id = result.get('task_id')
+            if not task_id:
+                st.error("Failed to get task ID from the server.")
+                return None
+            
+            # Poll for task status
+            status_url = f"{API_URL}/status/{task_id}"
+            return poll_task_status(status_url)
         else:
-            st.error(f"API Error: {response.status_code} - {response.text}")
+            st.error(f"Upload Error: {response.status_code} - {response.text}")
             return None
-    except requests.exceptions.Timeout:
-        st.error("Request timed out. The file processing may take longer than expected. Please try again with smaller files or wait a bit longer.")
-        return None
     except requests.exceptions.ConnectionError:
         st.error("Failed to connect to the API. Please make sure the Flask API is running.")
         return None
     except Exception as e:
-        st.error(f"Error connecting to the API: {str(e)}")
+        st.error(f"Error uploading files: {str(e)}")
+        return None
+
+
+# Function to poll task status
+def poll_task_status(status_url):
+    progress_bar = st.progress(0)
+    status_text = st.empty()
+    
+    try:
+        while True:
+            response = requests.get(status_url, timeout=30)
+            if response.status_code == 200:
+                status_data = response.json()
+                status = status_data.get('status', 'unknown')
+                
+                if status == 'processing':
+                    status_text.text("Processing files... This may take several minutes depending on the file size and number of files.")
+                    # We don't have a progress percentage, so we'll just keep the progress bar at 50%
+                    progress_bar.progress(50)
+                    time.sleep(2)  # Poll every 2 seconds
+                elif status == 'completed':
+                    progress_bar.progress(100)
+                    status_text.text("Processing complete!")
+                    return status_data.get('result')
+                elif status == 'failed':
+                    progress_bar.progress(100)
+                    status_text.text("Processing failed!")
+                    st.error(f"Processing failed: {status_data.get('message', 'Unknown error')}")
+                    return None
+                elif status == 'not_found':
+                    st.error("Task not found on the server.")
+                    return None
+                else:
+                    status_text.text(f"Status: {status}")
+                    time.sleep(2)  # Poll every 2 seconds
+            else:
+                st.error(f"Error checking status: {response.status_code} - {response.text}")
+                return None
+    except requests.exceptions.ConnectionError:
+        st.error("Lost connection to the API while checking status.")
+        return None
+    except Exception as e:
+        st.error(f"Error while checking status: {str(e)}")
         return None
 
 # Function to read file content
@@ -126,7 +174,7 @@ if st.button("Generate Datasets", type="primary"):
             col1, col2, col3 = st.columns(3)
             
             with col1:
-                st.metric("Total Files Processed", result.get("file_count", "N/A"))
+                st.metric("Total Files Processed", len(uploaded_files))
             
             with col2:
                 st.metric("Q/A Pairs Generated", result.get("qa_count", "N/A"))

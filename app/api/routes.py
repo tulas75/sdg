@@ -1,13 +1,36 @@
 """API routes for file upload and dataset generation."""
 import os
 import zipfile
+import uuid
+import threading
+import time
 from typing import Union, Tuple, Dict, Any, List
-from flask import Blueprint, request, current_app
+from flask import Blueprint, request, current_app, jsonify
 from werkzeug.utils import secure_filename
 from app.utils.dataset_generator import generate_dataset_from_files
 
 
 bp = Blueprint('api', __name__, url_prefix='/api')
+
+# In-memory storage for task status (in production, use a database)
+task_status = {}
+
+def generate_task_id():
+    """Generate a unique task ID."""
+    return str(uuid.uuid4())
+
+def update_task_status(task_id, status, message="", result=None):
+    """Update the status of a task."""
+    task_status[task_id] = {
+        'status': status,  # 'queued', 'processing', 'completed', 'failed'
+        'message': message,
+        'result': result,
+        'timestamp': time.time()
+    }
+
+def get_task_status(task_id):
+    """Get the status of a task."""
+    return task_status.get(task_id, {'status': 'not_found', 'message': 'Task not found'})
 
 
 @bp.route('/health', methods=['GET'])
@@ -38,6 +61,9 @@ def upload_files() -> Union[Dict[str, Any], Tuple[Dict[str, str], int]]:
     if not os.path.exists(upload_dir):
         os.makedirs(upload_dir)
     
+    # Generate a task ID
+    task_id = generate_task_id()
+    
     # Save all files
     file_paths = []
     for file in files:
@@ -57,7 +83,27 @@ def upload_files() -> Union[Dict[str, Any], Tuple[Dict[str, str], int]]:
     provider = os.getenv('LITELLM_PROVIDER', 'ollama_chat')
     model = os.getenv('MODEL_NAME', 'gemma3:4b-it-fp16')
     
+    # Start the processing in a background thread
+    thread = threading.Thread(
+        target=process_files_async,
+        args=(task_id, file_paths, provider, model)
+    )
+    thread.start()
+    
+    # Return task ID immediately
+    return {
+        'task_id': task_id,
+        'message': 'File upload successful. Processing started.',
+        'status_url': f'/api/status/{task_id}'
+    }
+
+
+def process_files_async(task_id, file_paths, provider, model):
+    """Process files asynchronously and update task status."""
     try:
+        # Update task status to processing
+        update_task_status(task_id, 'processing', 'Processing files...')
+        
         # Generate dataset from multiple files
         result = generate_dataset_from_files(
             file_paths=file_paths,
@@ -65,13 +111,17 @@ def upload_files() -> Union[Dict[str, Any], Tuple[Dict[str, str], int]]:
             model=model
         )
         
-        return {
-            'message': f'Dataset generated successfully from {len(file_paths)} file(s)',
-            'train_file': result['train_file'],
-            'valid_file': result['valid_file'],
-            'test_file': result['test_file'],
-            'qa_count': result['qa_count'],
-            'file_count': len(file_paths)
-        }
+        # Update task status to completed
+        update_task_status(task_id, 'completed', 
+                          f'Dataset generated successfully from {len(file_paths)} file(s)', 
+                          result)
     except Exception as e:
-        return {'error': str(e)}, 500
+        # Update task status to failed
+        update_task_status(task_id, 'failed', str(e))
+
+
+@bp.route('/status/<task_id>', methods=['GET'])
+def get_status(task_id) -> Dict[str, Any]:
+    """Get the status of a processing task."""
+    status = get_task_status(task_id)
+    return status
