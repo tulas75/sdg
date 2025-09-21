@@ -1,0 +1,6 @@
+Flask
+litellm
+python-dotenv
+werkzeug
+PyPDF2
+python-docx
