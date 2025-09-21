@@ -2,6 +2,7 @@
 import os
 import json
 import random
+import textwrap
 from typing import Dict, Any, List
 import litellm
 from app.utils.text_utils import calculate_qa_count
@@ -102,25 +103,84 @@ def generate_qa_pairs(text: str, count: int, provider: str, model: str) -> List[
     except Exception as e:
         # Fallback: Generate simple Q/A pairs if LLM fails
         print(f"Error generating Q/A pairs with LLM: {e}")
-        for i in range(count):
-            qa_pairs.append({
-                "prompt": f"What is this text about? (Q{i+1})",
-                "completion": f"This is a text about the content provided. (A{i+1})"
-            })
+        qa_pairs = generate_fallback_qa_pairs(text, count)
     
     # Ensure we have the right number of pairs
     if len(qa_pairs) < count:
-        # Add more pairs if we don't have enough
-        for i in range(count - len(qa_pairs)):
-            qa_pairs.append({
-                "prompt": f"Additional question about the text? (Q{i+1})",
-                "completion": f"Additional answer based on the text content. (A{i+1})"
-            })
+        # Add more fallback pairs if we don't have enough
+        additional_pairs = generate_fallback_qa_pairs(text, count - len(qa_pairs))
+        qa_pairs.extend(additional_pairs)
     elif len(qa_pairs) > count:
         # Trim if we have too many
         qa_pairs = qa_pairs[:count]
         
     return qa_pairs
+
+
+def generate_fallback_qa_pairs(text: str, count: int) -> List[Dict[str, str]]:
+    """
+    Generate fallback Q/A pairs when LLM fails.
+    
+    Args:
+        text: Input text to generate Q/A pairs from
+        count: Number of Q/A pairs to generate
+        
+    Returns:
+        List of Q/A pairs in the format {"prompt": "...", "completion": "..."}
+    """
+    qa_pairs = []
+    
+    # Split text into sentences for better Q/A generation
+    sentences = text.split('.')
+    sentences = [s.strip() for s in sentences if s.strip()]
+    
+    # Extract key information for Q/A generation
+    # Use first few sentences as context
+    context = '. '.join(sentences[:min(5, len(sentences))]) + '.'
+    
+    # For large documents, extract key phrases
+    words = text.split()
+    key_phrases = []
+    
+    # Extract some key phrases from the text (every 50th word as a sample)
+    for i in range(0, min(len(words), 200), 10):
+        phrase = ' '.join(words[i:i+3])
+        if len(phrase) > 5 and len(phrase) < 50:
+            key_phrases.append(phrase)
+    
+    # Generate diverse fallback Q/A pairs
+    for i in range(count):
+        # Rotate through different question types
+        question_type = i % 4
+        
+        if question_type == 0 and sentences:
+            # Question about a sentence
+            sentence_idx = i % len(sentences)
+            qa_pairs.append({
+                "prompt": f"What is the main point of this statement: '{sentences[sentence_idx][:100]}...'?",
+                "completion": f"The statement conveys that {sentences[sentence_idx][:150]}..."
+            })
+        elif question_type == 1 and key_phrases:
+            # Question about a key phrase
+            phrase_idx = i % len(key_phrases)
+            qa_pairs.append({
+                "prompt": f"What does the phrase '{key_phrases[phrase_idx]}' refer to in this context?",
+                "completion": f"In this context, '{key_phrases[phrase_idx]}' refers to a key concept discussed in the text."
+            })
+        elif question_type == 2:
+            # Summary question
+            qa_pairs.append({
+                "prompt": "What are the key points covered in this document?",
+                "completion": f"Based on the content, key points include: {context[:200]}..."
+            })
+        else:
+            # General question about the document
+            qa_pairs.append({
+                "prompt": f"What is the main topic discussed in section {i+1}?",
+                "completion": "The text discusses various aspects of the main subject matter."
+            })
+            
+    return qa_pairs[:count]
 
 
 def write_jsonl_file(filepath: str, qa_pairs: List[Dict[str, str]]) -> None:
