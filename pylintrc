@@ -1,0 +1,35 @@
+[MASTER]
+load-plugins=
+
+[MESSAGES CONTROL]
+# Disable certain warnings that are not critical
+disable=
+    missing-docstring,
+    too-few-public-methods,
+    import-error,
+    fixme,
+    arguments-differ,
+    broad-except,
+    raise-missing-from,
+    too-many-branches,
+    too-many-locals,
+    unused-variable,
+    unused-import,
+    redefined-outer-name,
+    import-outside-toplevel,
+    no-else-return,
+    consider-using-in,
+    missing-final-newline,
+    trailing-whitespace,
+    line-too-long,
+    broad-exception-raised
+
+[FORMAT]
+# Maximum number of characters on a single line
+max-line-length=120
+
+[DESIGN]
+# Maximum number of branches for function / method body
+max-branches=20
+# Maximum number of local variables
+max-locals=25
