@@ -1,6 +1,7 @@
 """Dataset generator using LiteLLM."""
 import os
 import json
+import random
 from typing import Dict, Any, List
 import litellm
 from app.utils.text_utils import calculate_qa_count
@@ -153,10 +154,16 @@ def generate_dataset(file_path: str, provider: str, model: str) -> Dict[str, Any
     # Calculate Q/A pair counts
     counts = calculate_qa_count(len(text))
     
-    # Generate Q/A pairs for each dataset
-    train_qa = generate_qa_pairs(text, counts['train'], provider, model)
-    valid_qa = generate_qa_pairs(text, counts['valid'], provider, model)
-    test_qa = generate_qa_pairs(text, counts['test'], provider, model)
+    # Generate all Q/A pairs at once
+    all_qa_pairs = generate_qa_pairs(text, counts['total'], provider, model)
+    
+    # Randomly shuffle the Q/A pairs
+    random.shuffle(all_qa_pairs)
+    
+    # Distribute Q/A pairs according to the calculated counts
+    train_qa = all_qa_pairs[:counts['train']]
+    valid_qa = all_qa_pairs[counts['train']:counts['train'] + counts['valid']]
+    test_qa = all_qa_pairs[counts['train'] + counts['valid']:]
     
     # Create output directory if it doesn't exist
     output_dir = os.path.join(os.getcwd(), 'output')
@@ -204,10 +211,16 @@ def generate_dataset_from_files(file_paths: List[str], provider: str, model: str
     # Calculate Q/A pair counts based on combined text length
     counts = calculate_qa_count(len(combined_text))
     
-    # Generate Q/A pairs for each dataset
-    train_qa = generate_qa_pairs(combined_text, counts['train'], provider, model)
-    valid_qa = generate_qa_pairs(combined_text, counts['valid'], provider, model)
-    test_qa = generate_qa_pairs(combined_text, counts['test'], provider, model)
+    # Generate all Q/A pairs at once
+    all_qa_pairs = generate_qa_pairs(combined_text, counts['total'], provider, model)
+    
+    # Randomly shuffle the Q/A pairs
+    random.shuffle(all_qa_pairs)
+    
+    # Distribute Q/A pairs according to the calculated counts
+    train_qa = all_qa_pairs[:counts['train']]
+    valid_qa = all_qa_pairs[counts['train']:counts['train'] + counts['valid']]
+    test_qa = all_qa_pairs[counts['train'] + counts['valid']:]
     
     # Create output directory if it doesn't exist
     output_dir = os.path.join(os.getcwd(), 'output')
