@@ -56,23 +56,29 @@ def extract_fields_from_xlsx(file_path: str) -> Dict[str, Any]:
         # Group choices by list name
         if 'list_name' in choices_df.columns:
             for list_name in choices_df['list_name'].unique():
-                choice_lists[list_name] = choices_df[choices_df['list_name'] == list_name]['name'].tolist()
+                if pd.notna(list_name):  # Only process non-NaN list names
+                    choice_lists[list_name] = choices_df[choices_df['list_name'] == list_name]['name'].dropna().tolist()
         
         # Process survey questions
         for _, row in survey_df.iterrows():
-            if 'type' not in row or 'name' not in row:
+            # Skip structural elements like 'begin group' and 'begin repeat'
+            row_type = str(row.get('type', '')).strip().lower()
+            if row_type in ['begin_group', 'end_group', 'begin_repeat', 'end_repeat', 'note']:
+                continue
+                
+            if 'type' not in row or 'name' not in row or pd.isna(row['type']) or pd.isna(row['name']):
                 continue
                 
             field_info = {
-                'name': row['name'],
-                'type': row['type'],
-                'label': row.get('label', row['name'])
+                'name': str(row['name']),
+                'type': str(row['type']),
+                'label': str(row.get('label', row['name'])) if pd.notna(row.get('label', row['name'])) else str(row['name'])
             }
             
             # Check if this is a select question with choices
-            if 'select' in row['type'] and 'choice_filter' not in row:
+            if 'select' in str(row['type']) and 'choice_filter' not in row:
                 # Extract list name from type (e.g., "select_one countries" -> "countries")
-                parts = row['type'].split()
+                parts = str(row['type']).split()
                 if len(parts) > 1:
                     list_name = parts[-1]
                     if list_name in choice_lists:
@@ -108,7 +114,7 @@ def generate_fake_data_with_llm(fields_info: Dict[str, Any], row_count: int, pro
         # Create a prompt for XLSForm structure
         field_descriptions = "\n".join([
             f"- {field['name']} ({field['type']}): {field.get('label', field['name'])}" + 
-            (f" [Choices: {', '.join(field['choices'])}]" if 'choices' in field else "")
+            (f" [Choices: {', '.join(str(choice) for choice in field['choices'])}]" if 'choices' in field else "")
             for field in fields
         ])
     else:
@@ -244,51 +250,8 @@ def generate_fake_data_with_llm(fields_info: Dict[str, Any], row_count: int, pro
 
 def _generate_xlsform_field_value(field, first_names, last_names, domains, cities):
     """Generate a field value for XLSForm fields."""
-    field_name = field['name']
-    field_type = field.get('type', 'text')
-    
-    # Handle select questions with choices
-    if 'choices' in field:
-        if 'select_multiple' in field_type:
-            # Select multiple choices (1-3)
-            num_choices = random.randint(1, min(3, len(field['choices'])))
-            selected = random.sample(field['choices'], num_choices)
-            return selected  # Return as list
-        else:
-            # Select one choice
-            return random.choice(field['choices'])
-    elif 'name' in field_name.lower():
-        return f"{random.choice(first_names)} {random.choice(last_names)}"
-    elif 'email' in field_name.lower():
-        first = random.choice(first_names).lower()
-        last = random.choice(last_names).lower()
-        domain = random.choice(domains)
-        return f"{first}.{last}{random.randint(1, 99)}@{domain}"
-    elif 'phone' in field_name.lower():
-        return f"+1-{random.randint(100, 999)}-{random.randint(100, 999)}-{random.randint(1000, 9999)}"
-    elif 'address' in field_name.lower():
-        return f"{random.randint(100, 9999)} {random.choice(['Main St', 'First Ave', 'Elm St', 'Oak St', 'Pine St', 'Maple Ave', 'Cedar St', 'Park Ave', 'Washington St', 'Lake St'])}"
-    elif 'city' in field_name.lower():
-        return random.choice(cities)
-    elif 'date' in field_name.lower():
-        return f"2024-{random.randint(1, 12):02d}-{random.randint(1, 28):02d}"
-    elif 'age' in field_name.lower():
-        return random.randint(18, 80)
-    elif 'salary' in field_name.lower():
-        return random.randint(30000, 120000)
-    elif field_type in ['integer', 'number']:
-        return random.randint(1, 1000)
-    elif field_type == 'decimal':
-        return round(random.uniform(1, 1000), 2)
-    else:
-        # Default to text field
-        return f"Sample {field_name} {random.randint(1, 1000)}"
-
-
-def _generate_xlsform_field_value(field, first_names, last_names, domains, cities):
-    """Generate a field value for XLSForm fields."""
-    field_name = field['name']
-    field_type = field.get('type', 'text')
+    field_name = str(field['name']) if pd.notna(field['name']) else ""
+    field_type = str(field.get('type', 'text')) if pd.notna(field.get('type', 'text')) else 'text'
     
     # Handle select questions with choices
     if 'choices' in field:
@@ -323,42 +286,6 @@ def _generate_xlsform_field_value(field, first_names, last_names, domains, citie
     
     # Default to text field
     return f"Sample {field_name} {random.randint(1, 1000)}"
-
-
-def _generate_simple_field_value(field, first_names, last_names, domains, cities):
-    """Generate a field value for simple template fields."""
-    field_name = field['name'].lower()
-    sample_value = field['sample_value']
-    
-    # Handle numeric fields first
-    if sample_value.replace('.', '', 1).isdigit():
-        # Numeric field
-        if '.' in sample_value:
-            # For decimal numbers
-            return round(random.uniform(1, 1000), 2)
-        else:
-            # For integers
-            return random.randint(1, 1000)
-    
-    # Handle other field types with a mapping approach
-    field_mappings = {
-        'name': lambda: f"{random.choice(first_names)} {random.choice(last_names)}",
-        'email': lambda: f"{random.choice(first_names).lower()}.{random.choice(last_names).lower()}{random.randint(1, 99)}@{random.choice(domains)}",
-        'phone': lambda: f"+1-{random.randint(100, 999)}-{random.randint(100, 999)}-{random.randint(1000, 9999)}",
-        'address': lambda: f"{random.randint(100, 9999)} {random.choice(['Main St', 'First Ave', 'Elm St', 'Oak St', 'Pine St', 'Maple Ave', 'Cedar St', 'Park Ave', 'Washington St', 'Lake St'])}",
-        'city': lambda: random.choice(cities),
-        'date': lambda: f"2024-{random.randint(1, 12):02d}-{random.randint(1, 28):02d}",
-        'age': lambda: random.randint(18, 80),
-        'salary': lambda: random.randint(30000, 120000)
-    }
-    
-    # Check for matching field types
-    for key, func in field_mappings.items():
-        if key in field_name:
-            return func()
-    
-    # Default to text field
-    return f"Sample {field['name']} {random.randint(1, 1000)}"
 
 
 def generate_fallback_fake_data(fields_info: Dict[str, Any], row_count: int) -> List[Dict[str, Any]]:
@@ -398,6 +325,52 @@ def generate_fallback_fake_data(fields_info: Dict[str, Any], row_count: int) -> 
         fake_data.append(row)
         
     return fake_data
+
+
+def _generate_simple_field_value(field, first_names, last_names, domains, cities):
+    """Generate a field value for simple template fields."""
+    field_name = str(field['name']).lower() if pd.notna(field['name']) else ""
+    sample_value = str(field['sample_value']) if pd.notna(field['sample_value']) else ""
+    
+    # Handle name fields specifically for better fake data
+    if 'name' in field_name or 'nome' in field_name or 'cognome' in field_name:
+        if 'cognome' in field_name or 'surname' in field_name or 'lastname' in field_name:
+            return random.choice(last_names)
+        elif 'nome' in field_name or 'firstname' in field_name or 'given' in field_name:
+            return random.choice(first_names)
+        else:
+            # General name field
+            return f"{random.choice(first_names)} {random.choice(last_names)}"
+    
+    # Handle numeric fields
+    if sample_value.replace('.', '', 1).isdigit():
+        # Numeric field
+        if '.' in sample_value:
+            # For decimal numbers
+            return round(random.uniform(1, 1000), 2)
+        else:
+            # For integers
+            return random.randint(1, 1000)
+    
+    # Handle other field types with a mapping approach
+    field_mappings = {
+        'email': lambda: f"{random.choice(first_names).lower()}.{random.choice(last_names).lower()}{random.randint(1, 99)}@{random.choice(domains)}",
+        'phone': lambda: f"+1-{random.randint(100, 999)}-{random.randint(100, 999)}-{random.randint(1000, 9999)}",
+        'address': lambda: f"{random.randint(100, 9999)} {random.choice(['Main St', 'First Ave', 'Elm St', 'Oak St', 'Pine St', 'Maple Ave', 'Cedar St', 'Park Ave', 'Washington St', 'Lake St'])}",
+        'city': lambda: random.choice(cities),
+        'date': lambda: f"2024-{random.randint(1, 12):02d}-{random.randint(1, 28):02d}",
+        'age': lambda: random.randint(18, 80),
+        'salary': lambda: random.randint(30000, 120000)
+    }
+    
+    # Check for matching field types
+    for key, func in field_mappings.items():
+        if key in field_name:
+            return func()
+    
+    # Default to text field
+    return f"Sample {field['name']} {random.randint(1, 1000)}"
+
 
 
 def save_fake_data_to_file(fake_data: List[Dict[str, Any]], file_path: str, file_format: str = "csv") -> str:

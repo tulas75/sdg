@@ -14,14 +14,15 @@ st.set_page_config(
 # App title and description
 st.title("🔄 Synthetic Dataset Generator")
 st.markdown("""
-This app allows you to generate synthetic question-answer datasets from your documents using AI.
-Upload one or more files (PDF, DOCX, TXT, or ZIP) and get train/validation/test datasets in JSONL format.
+This app allows you to generate synthetic datasets using AI.
+You can either generate Q/A datasets from documents or fake data from XLSForm templates.
 """)
 
 # API configuration
 API_URL = os.getenv("API_URL", "http://127.0.0.1:5000/api")
 HEALTH_ENDPOINT = f"{API_URL}/health"
 UPLOAD_ENDPOINT = f"{API_URL}/upload"
+FAKE_DATA_ENDPOINT = f"{API_URL}/fake-data"
 
 # Check API health
 @st.cache_data(ttl=60)
@@ -69,6 +70,42 @@ def upload_files_and_generate(files):
         return None
 
 
+# Function to generate fake data from XLSForm
+def generate_fake_data(file, row_count, output_format):
+    if not file:
+        st.warning("Please select an XLSForm file to upload.")
+        return None
+    
+    # Prepare files and data for upload
+    files = {"file": (file.name, file, file.type)}
+    data = {"row_count": str(row_count), "format": output_format}
+    
+    try:
+        with st.spinner("Generating fake data..."):
+            # Upload file and get task ID
+            response = requests.post(FAKE_DATA_ENDPOINT, files=files, data=data, timeout=30)
+            
+        if response.status_code == 200:
+            result = response.json()
+            task_id = result.get('task_id')
+            if not task_id:
+                st.error("Failed to get task ID from the server.")
+                return None
+            
+            # Poll for task status
+            status_url = f"{API_URL}/status/{task_id}"
+            return poll_task_status(status_url)
+        else:
+            st.error(f"Upload Error: {response.status_code} - {response.text}")
+            return None
+    except requests.exceptions.ConnectionError:
+        st.error("Failed to connect to the API. Please make sure the Flask API is running.")
+        return None
+    except Exception as e:
+        st.error(f"Error generating fake data: {str(e)}")
+        return None
+
+
 # Function to poll task status
 def poll_task_status(status_url):
     progress_bar = st.progress(0)
@@ -82,7 +119,7 @@ def poll_task_status(status_url):
                 status = status_data.get('status', 'unknown')
                 
                 if status == 'processing':
-                    status_text.text("Processing files... This may take several minutes depending on the file size and number of files.")
+                    status_text.text("Processing... This may take several minutes depending on the file size and number of rows.")
                     # We don't have a progress percentage, so we'll just keep the progress bar at 50%
                     progress_bar.progress(50)
                     time.sleep(2)  # Poll every 2 seconds
@@ -123,13 +160,21 @@ def read_file_content(file_path):
 # Function to create download link for files
 def create_download_link(file_path, label):
     try:
-        with open(file_path, 'r', encoding='utf-8') as f:
+        with open(file_path, 'rb') as f:
             content = f.read()
+        # Determine mime type based on file extension
+        if file_path.endswith('.csv'):
+            mime_type = 'text/csv'
+        elif file_path.endswith('.xlsx'):
+            mime_type = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        else:
+            mime_type = 'application/json'
+            
         st.download_button(
             label=label,
             data=content,
             file_name=os.path.basename(file_path),
-            mime='application/json'
+            mime=mime_type
         )
     except Exception as e:
         st.error(f"Error preparing download for {file_path}: {str(e)}")
@@ -147,105 +192,195 @@ with st.sidebar:
     st.markdown("**API Endpoints:**")
     st.code(f"Health: {HEALTH_ENDPOINT}")
     st.code(f"Upload: {UPLOAD_ENDPOINT}")
+    st.code(f"Fake Data: {FAKE_DATA_ENDPOINT}")
 
-# Main content
-st.header("Upload Files")
+# Create tabs for different functionalities
+tab1, tab2 = st.tabs(["📚 Generate Q/A Datasets", "📊 Generate Fake Data"])
 
-# File uploader
-uploaded_files = st.file_uploader(
-    "Choose files to process",
-    type=["pdf", "docx", "txt", "zip"],
-    accept_multiple_files=True
-)
-
-# Process button
-if st.button("Generate Datasets", type="primary"):
-    if not uploaded_files:
-        st.warning("Please upload at least one file before generating datasets.")
-    else:
-        # Upload files and generate datasets
-        result = upload_files_and_generate(uploaded_files)
-        
-        if result:
-            st.success("Datasets generated successfully!")
+# Tab 1: Generate Q/A Datasets from documents
+with tab1:
+    st.header("Upload Files")
+    st.markdown("Generate question-answer datasets from your documents (PDF, DOCX, TXT, or ZIP)")
+    
+    # File uploader
+    uploaded_files = st.file_uploader(
+        "Choose files to process",
+        type=["pdf", "docx", "txt", "zip"],
+        accept_multiple_files=True,
+        key="qa_files"
+    )
+    
+    # Process button
+    if st.button("Generate Datasets", type="primary", key="generate_qa"):
+        if not uploaded_files:
+            st.warning("Please upload at least one file before generating datasets.")
+        else:
+            # Upload files and generate datasets
+            result = upload_files_and_generate(uploaded_files)
             
-            # Display results
-            st.subheader("Results")
-            col1, col2, col3 = st.columns(3)
-            
-            with col1:
-                st.metric("Total Files Processed", len(uploaded_files))
-            
-            with col2:
-                st.metric("Q/A Pairs Generated", result.get("qa_count", "N/A"))
-            
-            with col3:
-                st.metric("Output Files", 3)  # train, valid, test
-            
-            # Display file paths
-            st.subheader("Generated Files")
-            
-            train_file = result.get('train_file')
-            valid_file = result.get('valid_file')
-            test_file = result.get('test_file')
-            
-            if train_file:
-                with st.expander("Train Dataset Preview", expanded=False):
-                    train_content = read_file_content(train_file)
-                    if train_content:
-                        # Show first few lines
-                        lines = train_content.split('\n')[:5]
-                        st.code('\n'.join(lines), language='json')
-            
-            if valid_file:
-                with st.expander("Validation Dataset Preview", expanded=False):
-                    valid_content = read_file_content(valid_file)
-                    if valid_content:
-                        # Show first few lines
-                        lines = valid_content.split('\n')[:5]
-                        st.code('\n'.join(lines), language='json')
-            
-            if test_file:
-                with st.expander("Test Dataset Preview", expanded=False):
-                    test_content = read_file_content(test_file)
-                    if test_content:
-                        # Show first few lines
-                        lines = test_content.split('\n')[:5]
-                        st.code('\n'.join(lines), language='json')
-            
-            # Download buttons
-            st.subheader("Download Datasets")
-            
-            # Create download buttons for each file
-            col1, col2, col3 = st.columns(3)
-            
-            with col1:
+            if result:
+                st.success("Datasets generated successfully!")
+                
+                # Display results
+                st.subheader("Results")
+                col1, col2, col3 = st.columns(3)
+                
+                with col1:
+                    st.metric("Total Files Processed", str(len(uploaded_files)))
+                
+                with col2:
+                    st.metric("Q/A Pairs Generated", str(result.get("qa_count", "N/A")))
+                
+                with col3:
+                    st.metric("Output Files", "3")  # train, valid, test
+                
+                # Display file paths
+                st.subheader("Generated Files")
+                
+                train_file = result.get('train_file')
+                valid_file = result.get('valid_file')
+                test_file = result.get('test_file')
+                
                 if train_file:
-                    create_download_link(train_file, "Download Train Dataset")
-            
-            with col2:
+                    with st.expander("Train Dataset Preview", expanded=False):
+                        train_content = read_file_content(train_file)
+                        if train_content:
+                            # Show first few lines
+                            lines = train_content.split('\n')[:5]
+                            st.code('\n'.join(lines), language='json')
+                
                 if valid_file:
-                    create_download_link(valid_file, "Download Validation Dataset")
-            
-            with col3:
+                    with st.expander("Validation Dataset Preview", expanded=False):
+                        valid_content = read_file_content(valid_file)
+                        if valid_content:
+                            # Show first few lines
+                            lines = valid_content.split('\n')[:5]
+                            st.code('\n'.join(lines), language='json')
+                
                 if test_file:
-                    create_download_link(test_file, "Download Test Dataset")
+                    with st.expander("Test Dataset Preview", expanded=False):
+                        test_content = read_file_content(test_file)
+                        if test_content:
+                            # Show first few lines
+                            lines = test_content.split('\n')[:5]
+                            st.code('\n'.join(lines), language='json')
+                
+                # Download buttons
+                st.subheader("Download Datasets")
+                
+                # Create download buttons for each file
+                col1, col2, col3 = st.columns(3)
+                
+                with col1:
+                    if train_file:
+                        create_download_link(train_file, "Download Train Dataset")
+                
+                with col2:
+                    if valid_file:
+                        create_download_link(valid_file, "Download Validation Dataset")
+                
+                with col3:
+                    if test_file:
+                        create_download_link(test_file, "Download Test Dataset")
+
+# Tab 2: Generate Fake Data from XLSForm
+with tab2:
+    st.header("Upload XLSForm Template")
+    st.markdown("Generate fake data from your XLSForm template with customizable row count")
+    
+    # File uploader for XLSForm
+    xlsform_file = st.file_uploader(
+        "Choose XLSForm file to process",
+        type=["xlsx"],
+        key="fake_data_file"
+    )
+    
+    # Parameters
+    col1, col2 = st.columns(2)
+    with col1:
+        row_count = st.number_input("Number of rows", min_value=1, max_value=10000, value=100, step=10)
+    with col2:
+        output_format = st.selectbox("Output format", ["csv", "xlsx"], index=0)
+    
+    # Generate button
+    if st.button("Generate Fake Data", type="primary", key="generate_fake"):
+        if not xlsform_file:
+            st.warning("Please upload an XLSForm file before generating fake data.")
+        else:
+            # Generate fake data
+            result = generate_fake_data(xlsform_file, row_count, output_format)
+            
+            if result:
+                st.success("Fake data generated successfully!")
+                
+                # Display results
+                st.subheader("Results")
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    st.metric("Rows Generated", str(result.get("row_count", "N/A")))
+                
+                with col2:
+                    st.metric("Output Format", result.get("format", "N/A").upper())
+                
+                # Display output file
+                st.subheader("Generated File")
+                output_file = result.get('output_file')
+                
+                if output_file:
+                    with st.expander("Generated Data Preview", expanded=False):
+                        if output_file.endswith('.csv'):
+                            # Show CSV preview
+                            try:
+                                with open(output_file, 'r', encoding='utf-8') as f:
+                                    lines = f.readlines()[:10]  # Show first 10 lines
+                                    st.text(''.join(lines))
+                            except Exception as e:
+                                st.error(f"Error reading CSV file: {str(e)}")
+                        else:
+                            st.info("Preview not available for XLSX files. Please download to view.")
+                    
+                    # Download button
+                    st.subheader("Download Generated Data")
+                    create_download_link(output_file, f"Download Fake Data ({output_format.upper()})")
 
 # Information section
 st.markdown("---")
 st.header("ℹ️ How It Works")
-st.markdown("""
-1. **Upload Files**: Upload one or more documents (PDF, DOCX, TXT, or ZIP)
-2. **Processing**: The system extracts text from your documents
-3. **AI Generation**: Using an LLM, the system generates question-answer pairs
-4. **Dataset Creation**: Datasets are split into train/validation/test sets (80/10/10)
-5. **Download**: Download the generated datasets in JSONL format
-""")
 
-st.header("📁 Supported File Types")
-st.markdown("""
-- **PDF (.pdf)**: Portable Document Format files
-- **Word Documents (.docx)**: Microsoft Word documents
-- **Text Files (.txt)**: Plain text files
-- **ZIP Archives (.zip)**: Compressed files containing any of the above
-""")
+# Create tabs for different how-it-works sections
+how_tab1, how_tab2 = st.tabs(["📚 Q/A Dataset Generation", "📊 Fake Data Generation"])
+
+with how_tab1:
+    st.markdown("""
+    1. **Upload Files**: Upload one or more documents (PDF, DOCX, TXT, or ZIP)
+    2. **Processing**: The system extracts text from your documents
+    3. **AI Generation**: Using an LLM, the system generates question-answer pairs
+    4. **Dataset Creation**: Datasets are split into train/validation/test sets (80/10/10)
+    5. **Download**: Download the generated datasets in JSONL format
+    """)
+    
+    st.header("📁 Supported File Types")
+    st.markdown("""
+    - **PDF (.pdf)**: Portable Document Format files
+    - **Word Documents (.docx)**: Microsoft Word documents
+    - **Text Files (.txt)**: Plain text files
+    - **ZIP Archives (.zip)**: Compressed files containing any of the above
+    """)
+
+with how_tab2:
+    st.markdown("""
+    1. **Upload XLSForm**: Upload your XLSForm template with survey structure
+    2. **Processing**: The system parses your XLSForm structure and choices
+    3. **AI Generation**: Using an LLM, the system generates realistic fake data
+    4. **Data Creation**: Data is generated respecting field types and choice constraints
+    5. **Download**: Download the generated data in CSV or XLSX format
+    """)
+    
+    st.header("📋 XLSForm Support")
+    st.markdown("""
+    - **Survey Sheet**: Field definitions with types and labels
+    - **Choices Sheet**: Choice lists for select questions
+    - **Field Types**: Text, integer, decimal, date, select_one, select_multiple
+    - **Output Formats**: CSV or XLSX with proper data formatting
+    """)
