@@ -8,6 +8,7 @@ from typing import Union, Tuple, Dict, Any, List
 from flask import Blueprint, request, current_app, jsonify
 from werkzeug.utils import secure_filename
 from app.utils.dataset_generator import generate_dataset_from_files
+from app.utils.xlsx_handler import extract_fields_from_xlsx, generate_fake_data_with_llm, save_fake_data_to_file
 
 
 bp = Blueprint('api', __name__, url_prefix='/api')
@@ -115,6 +116,117 @@ def process_files_async(task_id, file_paths, provider, model):
         update_task_status(task_id, 'completed', 
                           f'Dataset generated successfully from {len(file_paths)} file(s)', 
                           result)
+    except Exception as e:
+        # Update task status to failed
+        update_task_status(task_id, 'failed', str(e))
+
+
+@bp.route('/fake-data', methods=['POST'])
+def generate_fake_data() -> Union[Dict[str, Any], Tuple[Dict[str, str], int]]:
+    """Generate fake data from an XLSX template."""
+    # Check if file was provided
+    if 'file' not in request.files:
+        return {'error': 'No file provided'}, 400
+    
+    file = request.files['file']
+    if file.filename == '':
+        return {'error': 'Empty filename'}, 400
+    
+    # Get parameters
+    try:
+        row_count = int(request.form.get('row_count', 10))  # Default to 10 rows
+        output_format = request.form.get('format', 'csv')  # Default to CSV
+    except ValueError:
+        return {'error': 'Invalid row_count parameter'}, 400
+    
+    # Validate output format
+    if output_format not in ['csv', 'xlsx']:
+        return {'error': 'Invalid format. Supported formats: csv, xlsx'}, 400
+    
+    # Create uploads directory if it doesn't exist
+    upload_dir = os.path.join(os.getcwd(), 'uploads')
+    if not os.path.exists(upload_dir):
+        os.makedirs(upload_dir)
+    
+    # Generate a task ID
+    task_id = generate_task_id()
+    
+    # Secure the filename
+    filename = secure_filename(file.filename)
+    
+    # Save the file
+    file_path = os.path.join(upload_dir, filename)
+    file.save(file_path)
+    
+    # Get configuration from environment
+    provider = os.getenv('LITELLM_PROVIDER', 'ollama_chat')
+    model = os.getenv('MODEL_NAME', 'gemma3:4b-it-fp16')
+    
+    # Start the fake data generation in a background thread
+    thread = threading.Thread(
+        target=generate_fake_data_async,
+        kwargs={
+            'task_id': task_id,
+            'file_path': file_path,
+            'row_count': row_count,
+            'output_format': output_format,
+            'provider': provider,
+            'model': model
+        }
+    )
+    thread.start()
+    
+    # Return task ID immediately
+    return {
+        'task_id': task_id,
+        'message': f'XLSX template upload successful. Fake data generation started for {row_count} rows.',
+        'status_url': f'/api/status/{task_id}'
+    }
+
+
+def generate_fake_data_async(**kwargs):
+    """Generate fake data asynchronously and update task status."""
+    task_id = kwargs['task_id']
+    file_path = kwargs['file_path']
+    row_count = kwargs['row_count']
+    output_format = kwargs['output_format']
+    provider = kwargs['provider']
+    model = kwargs['model']
+    
+    try:
+        # Update task status to processing
+        update_task_status(task_id, 'processing', 'Processing XLSX template...')
+        
+        # Extract fields from XLSX file (now supports XLSForm)
+        fields_info = extract_fields_from_xlsx(file_path)
+        
+        # Update task status
+        update_task_status(task_id, 'processing', f'Generating {row_count} rows of fake data...')
+        
+        # Generate fake data using LLM
+        fake_data = generate_fake_data_with_llm(fields_info, row_count, provider, model)
+        
+        # Create output directory if it doesn't exist
+        output_dir = os.path.join(os.getcwd(), 'output')
+        if not os.path.exists(output_dir):
+            os.makedirs(output_dir)
+            
+        # Generate output filename
+        base_name = os.path.splitext(os.path.basename(file_path))[0]
+        output_filename = f"{base_name}_fake_data.{output_format}"
+        output_file_path = os.path.join(output_dir, output_filename)
+        
+        # Save fake data to file
+        saved_file_path = save_fake_data_to_file(fake_data, output_file_path, output_format)
+        
+        # Update task status to completed
+        update_task_status(task_id, 'completed', 
+                          f'Fake data generated successfully with {row_count} rows', 
+                          {
+                              'output_file': saved_file_path,
+                              'row_count': row_count,
+                              'format': output_format
+                          })
     except Exception as e:
         # Update task status to failed
         update_task_status(task_id, 'failed', str(e))

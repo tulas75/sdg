@@ -46,3 +46,11 @@ temp/
 
 # Sample files
 sample*.*
+
+# Qwen Code
+QWEN.md
+
+# Test files
+test_*.csv
+test_*.xlsx
+sample_xlsform.xlsx

@@ -153,5 +153,9 @@ def extract_text_from_file(file_path: str) -> str:
         return extract_text_from_txt(file_path)
     elif extension == '.zip':
         return extract_text_from_zip(file_path)
+    elif extension == '.xlsx':
+        # XLSX files are handled differently for fake data generation, 
+        # so we return a special marker
+        return "[XLSX_FILE_FOR_FAKE_DATA_GENERATION]"
     else:
         raise Exception(f"Unsupported file type: {extension}")

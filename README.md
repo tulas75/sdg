@@ -8,11 +8,14 @@ A Flask-based API service that generates synthetic Q/A datasets from user-upload
 - Generate synthetic question-answer pairs using LLMs via LiteLLM
 - Automatically calculate the number of Q/A pairs based on combined text length
 - Output datasets in JSONL format (train.jsonl, valid.jsonl, test.jsonl)
+- Generate fake data from XLSX templates with customizable row counts
+- Support for XLSForm structure with single and multiple choice questions
 - Support for multiple file formats:
   - PDF (.pdf)
   - Word Documents (.docx)
   - Plain Text (.txt)
   - ZIP archives containing any of the above
+  - Excel Templates (.xlsx) for fake data generation
 - Automatic language detection and generation in the same language as input text
 - Streamlit web interface for easy file upload and dataset generation
 
@@ -33,7 +36,7 @@ A Flask-based API service that generates synthetic Q/A datasets from user-upload
    python -m app.main
    ```
 
-The server will start on `http://localhost:5000`.
+The server will start on `http://localhost:5001`.
 
 ## API Endpoints
 
@@ -44,7 +47,7 @@ GET /api/health
 
 Example:
 ```bash
-curl http://localhost:5000/api/health
+curl http://localhost:5001/api/health
 ```
 
 ### Upload Files and Generate Dataset
@@ -59,13 +62,13 @@ Form data:
 Examples:
 ```bash
 # Single file
-curl -X POST -F "file=@document.pdf" http://localhost:5000/api/upload
+curl -X POST -F "file=@document.pdf" http://localhost:5001/api/upload
 
 # Multiple files
-curl -X POST -F "files=@document1.pdf" -F "files=@document2.docx" http://localhost:5000/api/upload
+curl -X POST -F "files=@document1.pdf" -F "files=@document2.docx" http://localhost:5001/api/upload
 
 # ZIP file containing multiple documents
-curl -X POST -F "file=@documents.zip" http://localhost:5000/api/upload
+curl -X POST -F "file=@documents.zip" http://localhost:5001/api/upload
 ```
 
 The API supports the following file types:
@@ -73,6 +76,38 @@ The API supports the following file types:
 - Word Documents (.docx)
 - Plain Text (.txt)
 - ZIP archives (.zip) containing any of the above
+
+### Generate Fake Data from XLSX Template
+```
+POST /api/fake-data
+```
+
+Form data:
+- `file`: XLSX template file
+- `row_count`: Number of rows to generate (optional, default: 10)
+- `format`: Output format ('csv' or 'xlsx', optional, default: 'csv')
+
+Examples:
+```bash
+# Generate 100 rows of fake data in CSV format
+curl -X POST -F "file=@template.xlsx" -F "row_count=100" http://localhost:5001/api/fake-data
+
+# Generate 50 rows of fake data in XLSX format
+curl -X POST -F "file=@template.xlsx" -F "row_count=50" -F "format=xlsx" http://localhost:5001/api/fake-data
+
+# Generate fake data from XLSForm with choices
+curl -X POST -F "file=@survey.xlsx" -F "row_count=25" http://localhost:5001/api/fake-data
+```
+
+### Check Task Status
+```
+GET /api/status/<task_id>
+```
+
+Example:
+```bash
+curl http://localhost:5001/api/status/123e4567-e89b-12d3-a456-426614174000
+```
 
 ## Web Interface (Streamlit)
 
@@ -99,22 +134,25 @@ The project includes a Streamlit web interface for easier interaction with the A
 
 2. Upload the file and generate datasets:
    ```bash
-   curl -X POST -F "file=@sample.txt" http://localhost:5000/api/upload
+   curl -X POST -F "file=@sample.txt" http://localhost:5001/api/upload
    ```
 
 3. You can also try with other supported formats:
    ```bash
    # For PDF files
-   curl -X POST -F "file=@document.pdf" http://localhost:5000/api/upload
+   curl -X POST -F "file=@document.pdf" http://localhost:5001/api/upload
    
    # For Word documents
-   curl -X POST -F "file=@document.docx" http://localhost:5000/api/upload
+   curl -X POST -F "file=@document.docx" http://localhost:5001/api/upload
    
    # For multiple files
-   curl -X POST -F "files=@document1.pdf" -F "files=@document2.docx" http://localhost:5000/api/upload
+   curl -X POST -F "files=@document1.pdf" -F "files=@document2.docx" http://localhost:5001/api/upload
    
    # For ZIP files containing multiple documents
-   curl -X POST -F "file=@documents.zip" http://localhost:5000/api/upload
+   curl -X POST -F "file=@documents.zip" http://localhost:5001/api/upload
+   
+   # For XLSX template to generate fake data
+   curl -X POST -F "file=@template.xlsx" -F "row_count=50" http://localhost:5001/api/fake-data
    ```
 
 4. Check the output files in the `output` directory:
@@ -145,6 +183,20 @@ The generated datasets are in JSONL format with each line containing a JSON obje
 {"prompt": "What is the capital of France?", "completion": "Paris."}
 ```
 
+For fake data generation, the output will be either CSV or XLSX files with columns matching the field names from the template.
+
+For XLSForm templates with choices:
+- Single choice fields will contain one value from the available choices
+- Multiple choice fields will contain an array of values from the available choices
+- Choice values use the `name` field from the XLSForm choices sheet (not the `label`)
+
+Example CSV output for XLSForm:
+```csv
+name,age,gender,skills,registration_date
+John Smith,32,male,[python,javascript],2024-05-15
+Jane Doe,28,female,[java,csharp],2024-05-16
+```
+
 ## How It Works
 
 1. User uploads one or more files (PDF, DOCX, TXT, or ZIP)
@@ -160,3 +212,11 @@ The generated datasets are in JSONL format with each line containing a JSON obje
 4. For each text chunk, the system detects the language automatically
 5. LiteLLM generates Q/A pairs using the configured provider and model in the detected language
 6. Datasets are saved as JSONL files in the `output` directory
+
+For XLSX template processing:
+1. User uploads an XLSX file with column headers representing field names
+2. System detects if the file is an XLSForm (has survey and choices sheets)
+3. For XLSForms, parses the survey structure and choice lists
+4. LiteLLM generates realistic fake data based on the field names, types, and choices
+5. For select_multiple fields, data is generated as arrays using the choice name values
+6. The generated data is saved as either CSV or XLSX in the `output` directory
