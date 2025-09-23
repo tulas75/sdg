@@ -8,7 +8,7 @@ A Flask-based API service that generates synthetic Q/A datasets from user-upload
 - Generate synthetic question-answer pairs using LLMs via LiteLLM
 - Automatically calculate the number of Q/A pairs based on combined text length
 - Output datasets in JSONL format (train.jsonl, valid.jsonl, test.jsonl)
-- Generate fake data from XLSX templates with customizable row counts
+- Generate fake data from XLSForm templates with customizable row counts
 - Support for XLSForm structure with single and multiple choice questions
 - Support for multiple file formats:
   - PDF (.pdf)
@@ -77,23 +77,23 @@ The API supports the following file types:
 - Plain Text (.txt)
 - ZIP archives (.zip) containing any of the above
 
-### Generate Fake Data from XLSX Template
+### Generate Fake Data from XLSForm Template
 ```
 POST /api/fake-data
 ```
 
 Form data:
-- `file`: XLSX template file
+- `file`: XLSForm template file
 - `row_count`: Number of rows to generate (optional, default: 10)
 - `format`: Output format ('csv' or 'xlsx', optional, default: 'csv')
 
 Examples:
 ```bash
 # Generate 100 rows of fake data in CSV format
-curl -X POST -F "file=@template.xlsx" -F "row_count=100" http://localhost:5001/api/fake-data
+curl -X POST -F "file=@survey.xlsx" -F "row_count=100" http://localhost:5001/api/fake-data
 
 # Generate 50 rows of fake data in XLSX format
-curl -X POST -F "file=@template.xlsx" -F "row_count=50" -F "format=xlsx" http://localhost:5001/api/fake-data
+curl -X POST -F "file=@survey.xlsx" -F "row_count=50" -F "format=xlsx" http://localhost:5001/api/fake-data
 
 # Generate fake data from XLSForm with choices
 curl -X POST -F "file=@survey.xlsx" -F "row_count=25" http://localhost:5001/api/fake-data
@@ -151,8 +151,8 @@ The project includes a Streamlit web interface for easier interaction with the A
    # For ZIP files containing multiple documents
    curl -X POST -F "file=@documents.zip" http://localhost:5001/api/upload
    
-   # For XLSX template to generate fake data
-   curl -X POST -F "file=@template.xlsx" -F "row_count=50" http://localhost:5001/api/fake-data
+   # For XLSForm template to generate fake data
+   curl -X POST -F "file=@survey.xlsx" -F "row_count=50" http://localhost:5001/api/fake-data
    ```
 
 4. Check the output files in the `output` directory:
@@ -213,10 +213,9 @@ Jane Doe,28,female,[java,csharp],2024-05-16
 5. LiteLLM generates Q/A pairs using the configured provider and model in the detected language
 6. Datasets are saved as JSONL files in the `output` directory
 
-For XLSX template processing:
-1. User uploads an XLSX file with column headers representing field names
-2. System detects if the file is an XLSForm (has survey and choices sheets)
-3. For XLSForms, parses the survey structure and choice lists
-4. LiteLLM generates realistic fake data based on the field names, types, and choices
-5. For select_multiple fields, data is generated as arrays using the choice name values
-6. The generated data is saved as either CSV or XLSX in the `output` directory
+For XLSForm template processing:
+1. User uploads an XLSX file with XLSForm structure (survey and choices sheets)
+2. System parses the survey structure and choice lists
+3. LiteLLM generates realistic fake data based on the field names, types, and choices
+4. For select_multiple fields, data is generated as arrays using the choice name values
+5. The generated data is saved as either CSV or XLSX in the `output` directory
